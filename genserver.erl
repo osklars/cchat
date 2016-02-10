@@ -16,7 +16,7 @@ loop(State, F) ->
         {'EXIT', Reason} ->
           From!{exit, Ref, Reason},
           loop(State, F);
-        {R, NewState} ->
+        {reply, R, NewState} ->
           From!{result, Ref, R},
           loop(NewState, F)
         end;
@@ -41,9 +41,9 @@ request(Pid, Data, Timeout) ->
     {result, Ref, Result} ->
       Result;
     {exit, Ref, Reason} ->
-      exit(Reason)
+      error(Reason)
   after Timeout ->
-    exit("Timeout")
+    error("Timeout")
   end.
 
 %% Update loop function
