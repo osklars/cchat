@@ -30,7 +30,7 @@ init(Name) ->
     InitState = server:initial_state(?SERVER),
     Result1 = slave:start(?HOST, ?SERVERNODENAME, "-setcookie dchat"),
     assert_ok("start server node "++atom_to_list(?SERVERNODE), element(1,Result1)),
-    Result2 = remote_start(?SERVERNODE, [?SERVERATOM, InitState, fun server:loop/2]),
+    Result2 = remote_start(?SERVERNODE, [?SERVERATOM, InitState, fun server:handle/2]),
     assert("server startup", is_pid(Result2)).
 
 % Start a new client
@@ -52,7 +52,7 @@ new_client(Nick, GUIName) ->
     ClientNode = element(2,Result),
 
     InitState = client:initial_state(Nick, GUIName),
-    Result2 = remote_start(ClientNode, [ClientAtom, InitState, fun client:loop/2]),
+    Result2 = remote_start(ClientNode, [ClientAtom, InitState, fun client:handle/2]),
     assert("client startup "++ClientName, is_pid(Result2)),
 
     {Nick, ClientAtom, ClientNode}.

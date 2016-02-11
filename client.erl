@@ -1,5 +1,5 @@
 -module(client).
--export([loop/2, initial_state/2]).
+-export([handle/2, initial_state/2]).
 -include_lib("./defs.hrl").
 
 %% Produce initial state
@@ -8,10 +8,10 @@ initial_state(Nick, GUIName) ->
 
 %% ---------------------------------------------------------------------------
 
-%% loop handles each kind of request from GUI
+%% handle/2 handles each kind of request from GUI
 
 %% Connect to server
-loop(St, {connect, Server}) ->
+handle(St, {connect, Server}) ->
     Data = "hello?",
     io:fwrite("Client is sending: ~p~n", [Data]),
     ServerAtom = list_to_atom(Server),
@@ -21,36 +21,36 @@ loop(St, {connect, Server}) ->
     {reply, {error, not_implemented, "Not implemented"}, St} ;
 
 %% Disconnect from server
-loop(St, disconnect) ->
+handle(St, disconnect) ->
     % {ok, St} ;
     {reply, {error, not_implemented, "Not implemented"}, St} ;
 
 % Join channel
-loop(St, {join, Channel}) ->
+handle(St, {join, Channel}) ->
     % {ok, St} ;
     {reply, {error, not_implemented, "Not implemented"}, St} ;
 
 %% Leave channel
-loop(St, {leave, Channel}) ->
+handle(St, {leave, Channel}) ->
     % {ok, St} ;
     {reply, {error, not_implemented, "Not implemented"}, St} ;
 
 % Sending messages
-loop(St, {msg_from_GUI, Channel, Msg}) ->
+handle(St, {msg_from_GUI, Channel, Msg}) ->
     % {ok, St} ;
     {reply, {error, not_implemented, "Not implemented"}, St} ;
 
 %% Get current nick
-loop(St, whoami) ->
+handle(St, whoami) ->
     % {"nick", St} ;
     {reply, {error, not_implemented, "Not implemented"}, St} ;
 
 %% Change nick
-loop(St, {nick, Nick}) ->
+handle(St, {nick, Nick}) ->
     % {ok, St} ;
     {reply, {error, not_implemented, "Not implemented"}, St} ;
 
 %% Incoming message
-loop(St = #client_st { gui = GUIName }, {incoming_msg, Channel, Name, Msg}) ->
+handle(St = #client_st { gui = GUIName }, {incoming_msg, Channel, Name, Msg}) ->
     gen_server:call(list_to_atom(GUIName), {msg_to_GUI, Channel, Name++"> "++Msg}),
     {reply, ok, St}.

@@ -119,7 +119,7 @@ init(Name) ->
     ?assert(compile:file(server) =:= {ok,server}),
     putStrLn(blue("\n# Test: "++Name)),
     InitState = server:initial_state(?SERVER),
-    Pid = genserver:start(?SERVERATOM, InitState, fun server:loop/2),
+    Pid = genserver:start(?SERVERATOM, InitState, fun server:handle/2),
     % putStrLn("server ~p", [Pid]),
     assert("server startup", is_pid(Pid)),
     Pid.
@@ -154,7 +154,7 @@ new_client(Nick) ->
 new_client(Nick, GUIName) ->
     ClientName = find_unique_name("client_"),
     ClientAtom = list_to_atom(ClientName),
-    Pid = genserver:start(ClientAtom, client:initial_state(Nick, GUIName), fun client:loop/2),
+    Pid = genserver:start(ClientAtom, client:initial_state(Nick, GUIName), fun client:handle/2),
     {Pid, Nick, ClientAtom}.
 
 % Start a new client and connect to server
@@ -426,7 +426,7 @@ connect_nonexistent_server_test() ->
 connect_nonresponding_server_test() ->
     Name = "connect_nonresponding_server",
     putStrLn(blue("\n# Test: "++Name)),
-    Pid = genserver:start(?SERVERATOM, {}, fun (St, _Msg) -> timer:sleep(100000), {dead, St} end), %% blocking server
+    Pid = genserver:start(?SERVERATOM, {}, fun (St, _Msg) -> timer:sleep(100000), {reply, dead, St} end), %% blocking server
     assert("server startup", is_pid(Pid)),
     putStrLn("Wait a few seconds for timeout..."),
     {_Pid, _Nick, ClientAtom} = new_client(),
@@ -576,7 +576,7 @@ robustness_channel() ->
       ClientAtom = list_to_atom(ClientName),
       GUIName = "gui_conc1_"++Is,
       new_gui(GUIName, ParentPid),
-      ClientPid = genserver:start(ClientAtom, client:initial_state(Nick, GUIName), fun client:loop/2),
+      ClientPid = genserver:start(ClientAtom, client:initial_state(Nick, GUIName), fun client:handle/2),
       sleepy ! {add_client, ClientPid},
       connect(ClientAtom),
 
@@ -661,7 +661,7 @@ robustness_server() ->
       ClientAtom = list_to_atom(ClientName),
       GUIName = "gui_conc3_"++Is,
       new_gui(GUIName, ParentPid),
-      genserver:start(ClientAtom, client:initial_state(Nick, GUIName), fun client:loop/2),
+      genserver:start(ClientAtom, client:initial_state(Nick, GUIName), fun client:handle/2),
       connect(ClientAtom),
 
       Ch_Ix = (I rem ?CONC_3_CHANS) + 1,
@@ -734,7 +734,7 @@ process_usage_test_DISABLED() ->
     ClientAtom = list_to_atom(ClientName),
     GUIName = "gui_conc2_"++Is,
     new_gui(GUIName),
-    genserver:start(ClientAtom, client:initial_state(Nick, GUIName), fun client:loop/2),
+    genserver:start(ClientAtom, client:initial_state(Nick, GUIName), fun client:handle/2),
     connect(ClientAtom),
     ClientAtom
   end,
@@ -794,7 +794,7 @@ many_users_one_channel() ->
                         ClientAtom = list_to_atom(ClientName),
                         GUIName = "gui_perf1_"++Is,
                         new_gui(GUIName),
-                        genserver:start(ClientAtom, client:initial_state(Nick, GUIName), fun client:loop/2),
+                        genserver:start(ClientAtom, client:initial_state(Nick, GUIName), fun client:handle/2),
                         T1 = os:timestamp(),
                         connect(ClientAtom),
                         join_channel(ClientAtom, Channel),
@@ -843,7 +843,7 @@ many_users_many_channels() ->
                         ClientAtom = list_to_atom(ClientName),
                         GUIName = "gui_perf2_"++Is,
                         new_gui(GUIName),
-                        genserver:start(ClientAtom, client:initial_state(Nick, GUIName), fun client:loop/2),
+                        genserver:start(ClientAtom, client:initial_state(Nick, GUIName), fun client:handle/2),
                         T1 = os:timestamp(),
                         connect(ClientAtom),
                         G = fun(Ch_Ix) ->
