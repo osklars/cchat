@@ -6,9 +6,9 @@
 -define(SERVERATOM, list_to_atom(?SERVER)).
 -define(MAX, 100000).
 
--define(PERF_1_USERS, 100).
+-define(PERF_1_USERS, 50).
 
--define(PERF_2_USERS, 150).
+-define(PERF_2_USERS, 10).
 -define(PERF_2_CHANS, 100).
 -define(PERF_2_MSGS, 5).
 
@@ -426,7 +426,7 @@ connect_nonexistent_server_test() ->
 connect_nonresponding_server_test() ->
     Name = "connect_nonresponding_server",
     putStrLn(blue("\n# Test: "++Name)),
-    Pid = genserver:start(?SERVERATOM, {}, fun (St, _Msg) -> timer:sleep(100000), {reply, dead, St} end), %% blocking server
+    Pid = genserver:start(?SERVERATOM, {}, fun (St, _Msg) -> timer:sleep(100000), {dead, St} end), %% blocking server
     assert("server startup", is_pid(Pid)),
     putStrLn("Wait a few seconds for timeout..."),
     {_Pid, _Nick, ClientAtom} = new_client(),
@@ -519,7 +519,7 @@ nick_taken_test_DISABLED() ->
 
 % --- Concurrency unit tests -------------------------------------------------
 
-robustness_channel_test_() ->
+robustness_channel_test_DISABLE() ->
     {timeout, 10, [{test_client,robustness_channel}]}.
 
 -define(CONC_1_CHANS, 4).
@@ -631,7 +631,7 @@ robustness_channel() ->
   assert(Msg, Cond).
 
 
-robustness_server_test_() ->
+robustness_server_test_DISABLE() ->
     {timeout, 10, [{test_client,robustness_server}]}.
 
 -define(CONC_3_CHANS, 4).
@@ -779,10 +779,14 @@ process_usage_test_DISABLED() ->
 %     {timeout, 60, [{test_client,many_users_one_channel}]}.
 %
 % Tests that broadcasting is concurrent
-many_users_one_channel() ->
+% Creates many users (this needs to be spaced out as logging in might be a bottle neck),
+% and sends one message to a channel where all of the users are registered.
+many_users_one_channel(NumUsers) ->
     init("many_users_one_channel"),
+    ServerPid = whereis(?SERVERATOM),
     Channel = new_channel(),
     ParentPid = self(),
+    Ref = make_ref(),
     F = fun (I) ->
                 fun () ->
                     try
@@ -794,50 +798,106 @@ many_users_one_channel() ->
                         ClientAtom = list_to_atom(ClientName),
                         GUIName = "gui_perf1_"++Is,
                         new_gui(GUIName),
-                        genserver:start(ClientAtom, client:initial_state(Nick, GUIName), fun client:handle/2),
+                        ClientPid = genserver:start(ClientAtom, client:initial_state(Nick, GUIName), fun client:handle/2),
+                        ParentPid ! {client, ClientPid, Ref},
                         T1 = os:timestamp(),
-                        connect(ClientAtom),
-                        join_channel(ClientAtom, Channel),
-                        send_message(ClientAtom, Channel, "message_"++Is++"_1"),
-                        send_message(ClientAtom, Channel, "message_"++Is++"_2"),
-                        leave_channel(ClientAtom, Channel),
-                        disconnect(ClientAtom),
+                        receive go -> ok end,
+                        try
+                          try
+                            connect(ClientAtom),
+                            join_channel(ClientAtom, Channel)
+                          catch
+                            T:E ->
+                              if I == 1 -> ParentPid ! {msgSent, Ref};
+                                 true   -> ok end,
+                              apply(erlang, T, [E])
+                          after
+                            ParentPid ! {joined, Ref}
+                          end,
+                          receive go2 -> ok end,
+                          if I == 1 -> 
+                                       io:format(user, "client 1 sending message...~n", []),
+                                       TX1 = os:timestamp(),
+                                       try
+                                         send_message(ClientAtom, Channel, "message_"++Is++"_1"),
+                                         TX2 = os:timestamp(),
+                                         io:format(user, "sending message took ~p ms~n", [timer:now_diff(TX2, TX1) div 1000])
+                                       after
+                                         ParentPid ! {msgSent, Ref}
+                                       end;
+                             true   -> ok
+                          end,
+                          receive go3 -> ok end,
+                          leave_channel(ClientAtom, Channel),
+                          disconnect(ClientAtom)
+                        after
+                          ParentPid ! {disconnected, Ref}
+                        end,
                         T2 = os:timestamp(),
-                        ParentPid ! {ready, timer:now_diff(T2, T1)}
+                        ParentPid ! {ready, Ref, timer:now_diff(T2, T1)}
                     catch Ex ->
-                        ParentPid ! {failed, Ex}
+                        ParentPid ! {failed, Ref, Ex}
                     end
                 end
         end,
-    Seq = lists:seq(1, ?PERF_1_USERS),
+    Seq = lists:seq(1, NumUsers),
     Spawn = fun (I) -> spawn(F(I)) end,
     Recv  = fun (_) ->
                     receive
-                        {ready, Time} -> Time ;
-                        {failed, Ex} -> putStrLn(Ex),
+                        {ready, Ref, Time} -> Time ;
+                        {failed, Ref, Ex} -> putStrLn(Ex),
                                         throw("")
                     end
             end,
-    putStrLn("spawning ~p clients, each connecting to 1 channel...", [?PERF_1_USERS]),
-    spawn(fun() -> lists:foreach(Spawn, Seq) end),
+    % The sleepy process will tell request every request to a client to sleep for 100ms
+    Sleepy = fun (FF, Pids) ->
+      receive
+        {hi, ToPid, _Pid} ->
+          case lists:member(ToPid, Pids) of
+            true  -> ToPid ! {wait, 100}; % ms
+            false -> ToPid ! {go}
+          end,
+          FF(FF, Pids);
+        {add_client, Pid} ->
+          FF(FF, [Pid|Pids]);
+        stop -> stop
+      end
+    end,
+    catch(unregister(sleepy)),
+    register(sleepy, spawn(fun () -> Sleepy(Sleepy, []) end)),
+    putStrLn("spawning ~p clients, each connecting to 1 common channel; one message is sent...", [NumUsers]),
+    Pids = lists:map(Spawn, Seq),
+    [receive {client, CPid, Ref} -> sleepy!{add_client, CPid} end || _ <- Pids ],
+    [begin P ! go, receive {joined, Ref} -> ok end end || P <- Pids ],
+    io:format(user, "all clients connected and joined the channel~n", []),
+    [P ! go2 || P <- Pids ],
+    receive {msgSent, Ref} -> ok end,
+    io:format(user, "clients disconnecting...~n", []),
+    [begin P ! go3, receive {disconnected, Ref} -> ok end end || P <- Pids ],
     Times = lists:map(Recv, Seq),
+    sleepy ! stop,
     summary(Times).
 
 % many_users_many_channels_test_() ->
 %     {timeout, 60, [{test_client,many_users_many_channels}]}.
 
 % Tests that channels are implemented concurrently
-many_users_many_channels() ->
+many_users_many_channels(NumUsers) ->
     init("many_users_many_channels"),
     ParentPid = self(),
-    ChansSeq = lists:seq(1, ?PERF_2_CHANS),
-    UsersSeq = lists:seq(1, ?PERF_2_USERS),
-    MsgsSeq  = lists:seq(1, ?PERF_2_MSGS),
+    ServerPid = whereis(?SERVERATOM),
+    io:format(user, "ServerPid = ~p~n", [ServerPid]),
+    %ChansSeq = lists:seq(1, ?PERF_2_CHANS),
+    UsersSeq = lists:seq(1, NumUsers),
+    ChansNames = [ "#channel_"++integer_to_list(C) || C <- UsersSeq],
+    ChansNames2 = ChansNames ++ [hd(ChansNames)],
+    %MsgsSeq  = lists:seq(1, ?PERF_2_MSGS),
+    Ref = make_ref(),
     F = fun (I) ->
                 fun () ->
                     try
                         output_off(),
-                        Is = lists:flatten(integer_to_list(I)),
+                        Is = integer_to_list(I),
                         Nick = "user_perf2_"++Is,
                         ClientName = "client_perf2_"++Is,
                         ClientAtom = list_to_atom(ClientName),
@@ -845,39 +905,167 @@ many_users_many_channels() ->
                         new_gui(GUIName),
                         genserver:start(ClientAtom, client:initial_state(Nick, GUIName), fun client:handle/2),
                         T1 = os:timestamp(),
-                        connect(ClientAtom),
-                        G = fun(Ch_Ix) ->
-                                    Ch_Ixs = lists:flatten(io_lib:format("~p", [Ch_Ix])),
-                                    Channel = "#channel_"++Ch_Ixs,
-                                    join_channel(ClientAtom, Channel),
-                                    Send = fun (I2) ->
-                                                   Is2 = lists:flatten(io_lib:format("~p", [I2])),
-                                                   send_message(ClientAtom, Channel, "message_"++Is++"_"++Is2)
-                                           end,
-                                    lists:map(Send, MsgsSeq),
-                                    leave_channel(ClientAtom, Channel),
-                                    ok
+                        MyChs = lists:sublist(ChansNames2, I, 2),
+                        receive go -> ok end,
+                        try
+                          try
+                            try
+                              connect(ClientAtom),
+                              [join_channel(ClientAtom, Channel) || Channel <- MyChs]
+                            after
+                              ParentPid ! {joined, Ref}
                             end,
-                        lists:foreach(G, ChansSeq),
-                        disconnect(ClientAtom),
+                            receive go2 -> ok end,
+                            if I < NumUsers ->
+                                 TX1 = os:timestamp(),
+                                 io:format(user, "client ~p sending message...~n", [I]),
+                                 send_message(ClientAtom, hd(MyChs), "message_"++Is),
+                                 TX2 = os:timestamp(),
+                                 io:format(user, "client ~p: sending message took ~p ms~n", [I, timer:now_diff(TX2, TX1) div 1000]);
+                               true         -> ok end
+                          after
+                            ParentPid ! {sent, Ref}
+                          end,
+                          receive go3 -> ok end,
+                          [leave_channel(ClientAtom, Channel) || Channel <- MyChs],
+                          disconnect(ClientAtom)
+                        after
+                          ParentPid ! {disconnected, Ref}
+                        end,
                         T2 = os:timestamp(),
-                        ParentPid ! {ready, timer:now_diff(T2, T1)}
+                        ParentPid ! {ready, Ref, timer:now_diff(T2, T1)}
                     catch Ex ->
-                        ParentPid ! {failed, Ex}
+                        ParentPid ! {failed, Ref, Ex}
                     end
                 end
         end,
     Spawn = fun (I) -> spawn(F(I)) end,
     Recv  = fun (_) ->
                     receive
-                        {ready, Time} -> Time ;
-                        {failed, Ex} -> putStrLn(Ex),
+                        {ready, Ref, Time} -> Time ;
+                        {failed, Ref, Ex} -> putStrLn(Ex),
                                         throw("")
                     end
             end,
-    putStrLn("spawning ~p clients, each connecting to ~p channels...", [?PERF_2_USERS, ?PERF_2_CHANS]),
-    spawn(fun() -> lists:foreach(Spawn, UsersSeq) end),
+    % The sleepy process will tell request every request to sleep for 100ms
+    Sleepy = fun (FF) ->
+      receive
+        {hi, ToPid, Pid} ->
+          %io:format(user, "sleepy ~p ~p~n", [ToPid, Pid]),
+          ToPid ! {wait, 50}, % ms
+          FF(FF);
+        stop -> stop
+      end
+    end,
+    catch(unregister(sleepy)),
+    register(sleepy, spawn(fun () -> Sleepy(Sleepy) end)),
+    putStrLn("spawning ~p clients, each connecting to 2 channels; ~p messages are sent...", [NumUsers, NumUsers-1]),
+    putStrLn("ch1 ch2 ch3 ch4 ... chN (back to ch1)", []),
+    putStrLn(" | / | / | / | /   / | /", []),
+    putStrLn("u1  u2  u3  u4  ... uN", []),
+    putStrLn("clients 1 to ~p send a message, client I sends a message to channel I", [NumUsers-1]),
+    Pids = lists:map(Spawn, UsersSeq),
+    [begin P ! go, receive {joined, Ref} -> ok end end || P <- Pids ],
+    io:format(user, "all clients connected and joined the channels~n", []),
+    [P ! go2 || P <- Pids ],
+    [receive {sent, Ref} -> ok end || _ <- Pids ],
+    [begin P ! go3, receive {disconnected, Ref} -> ok end end || P <- Pids ],
     Times = lists:map(Recv, UsersSeq),
+    sleepy ! stop,
+    summary(Times).
+
+many_users_one_channel_deadlock(NumUsers) ->
+    init("many_users_one_channel_deadlock"),
+    ServerPid = whereis(?SERVERATOM),
+    Channel = new_channel(),
+    ParentPid = self(),
+    Ref = make_ref(),
+    F = fun (I) ->
+                fun () ->
+                    try
+                        output_off(),
+                        Is = lists:flatten(io_lib:format("~p", [I])),
+                        % {Pid, Nick, ClientAtom} = new_client("user_"++I),
+                        Nick = "user_perf1_"++Is,
+                        ClientName = "client_perf1_"++Is,
+                        ClientAtom = list_to_atom(ClientName),
+                        GUIName = "gui_perf1_"++Is,
+                        new_gui(GUIName),
+                        ClientPid = genserver:start(ClientAtom, client:initial_state(Nick, GUIName), fun client:handle/2),
+                        ParentPid ! {client, ClientPid, Ref},
+                        T1 = os:timestamp(),
+                        receive go -> ok end,
+                        try
+                          try
+                            connect(ClientAtom),
+                            join_channel(ClientAtom, Channel)
+                          catch
+                            T:E ->
+                              if I == 1 -> ParentPid ! {msgSent, Ref};
+                                 true   -> ok end,
+                              apply(erlang, T, [E])
+                          after
+                            ParentPid ! {joined, Ref}
+                          end,
+                          receive go2 -> ok end,
+                          io:format(user, "client ~p sending message...~n", [I]),
+                          TX1 = os:timestamp(),
+                          try
+                            send_message(ClientAtom, Channel, "message_"++Is++"_1"),
+                            TX2 = os:timestamp(),
+                            io:format(user, "client ~p: sending message took ~p ms~n", [I, timer:now_diff(TX2, TX1) div 1000])
+                          after
+                            ParentPid ! {msgSent, Ref}
+                          end,
+                          receive go3 -> ok end,
+                          leave_channel(ClientAtom, Channel),
+                          disconnect(ClientAtom)
+                        after
+                          ParentPid ! {disconnected, Ref}
+                        end,
+                        T2 = os:timestamp(),
+                        ParentPid ! {ready, Ref, timer:now_diff(T2, T1)}
+                    catch Ex ->
+                        ParentPid ! {failed, Ref, Ex}
+                    end
+                end
+        end,
+    Seq = lists:seq(1, NumUsers),
+    Spawn = fun (I) -> spawn(F(I)) end,
+    Recv  = fun (_) ->
+                    receive
+                        {ready, Ref, Time} -> Time ;
+                        {failed, Ref, Ex} -> putStrLn(Ex),
+                                        throw("")
+                    end
+            end,
+    % The sleepy process will tell request every request to a client to sleep for 100ms
+    Sleepy = fun (FF, Pids) ->
+      receive
+        {hi, ToPid, _Pid} ->
+          case lists:member(ToPid, Pids) of
+            true  -> ToPid ! {wait, 100}; % ms
+            false -> ToPid ! {go}
+          end,
+          FF(FF, Pids);
+        {add_client, Pid} ->
+          FF(FF, [Pid|Pids]);
+        stop -> stop
+      end
+    end,
+    catch(unregister(sleepy)),
+    register(sleepy, spawn(fun () -> Sleepy(Sleepy, []) end)),
+    putStrLn("spawning ~p clients, each connecting to 1 common channel; each client sends a message...", [NumUsers]),
+    Pids = lists:map(Spawn, Seq),
+    [receive {client, CPid, Ref} -> sleepy!{add_client, CPid} end || _ <- Pids ],
+    [begin P ! go, receive {joined, Ref} -> ok end end || P <- Pids ],
+    io:format(user, "all clients connected and joined the channel~n", []),
+    [P ! go2 || P <- Pids ],
+    [receive {msgSent, Ref} -> ok end || P <- Pids ],
+    io:format(user, "clients disconnecting...~n", []),
+    [begin P ! go3, receive {disconnected, Ref} -> ok end end || P <- Pids ],
+    Times = lists:map(Recv, Seq),
+    sleepy ! stop,
     summary(Times).
 
 % Display timing summary for perf tests

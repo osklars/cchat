@@ -12,6 +12,7 @@ start(Atom, State, F) ->
 loop(State, F) ->
   receive
     {request, From, Ref, Data} ->
+      maybeWait(From),
       case catch(F(State, Data)) of
         {'EXIT', Reason} ->
           From!{exit, Ref, Reason},
@@ -34,16 +35,15 @@ request(Pid, Data) ->
 %% Send a request to a Pid and wait for a response
 %% With a specified timeout
 request(Pid, Data, Timeout) ->
-  maybeWait(Pid),
   Ref = make_ref(),
   Pid!{request, self(), Ref, Data},
   receive
     {result, Ref, Result} ->
       Result;
     {exit, Ref, Reason} ->
-      error(Reason)
+      exit(Reason)
   after Timeout ->
-    error("Timeout")
+    exit("Timeout")
   end.
 
 %% Update loop function
@@ -56,11 +56,11 @@ update(Pid, Fun) ->
   end.
 
 %% If process sleepy exists, ask her if we should sleep
-maybeWait(ToPid) ->
+maybeWait(FromPid) ->
   case whereis(sleepy) of
     undefined -> ok ;
     Pid ->
-      Pid ! {hi, ToPid, self()},
+      Pid ! {hi, self(), FromPid},
       receive
         {wait, N} -> timer:sleep(N) ;
         {go} -> ok
