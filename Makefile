@@ -19,8 +19,12 @@ run_concurrency_tests: all
 	erl +P 1000000 -noshell -eval "eunit:test({timeout, 10, {test,test_client,process_usage_test}}), halt()"
 
 PERFTESTS = "[\
-{timeout, 60, {test,test_client,many_users_one_channel}},\
-{timeout, 60, {test,test_client,many_users_many_channels}}\
+{timeout, 60, fun () -> test_client:many_users_one_channel(20) end},\
+{timeout, 60, fun () -> test_client:many_users_one_channel(50) end},\
+{timeout, 60, fun () -> test_client:many_users_many_channels(5) end},\
+{timeout, 60, fun () -> test_client:many_users_many_channels(10) end},\
+{timeout, 60, fun () -> test_client:many_users_many_channels(20) end},\
+{timeout, 60, fun () -> test_client:many_users_one_channel_deadlock(3) end}\
 ]"
 
 run_perf_tests: all
