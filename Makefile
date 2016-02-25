@@ -33,3 +33,6 @@ run_perf_tests: all
 run_distributed_tests: all
 	-killall beam.smp 2>/dev/null
 	erl -noshell -name "testsuite@127.0.0.1" -setcookie dchat -eval "eunit:test(test_remote), halt()"
+
+run_workers_tests: all
+	erl -noshell -eval "eunit:test({timeout, 10, {test,test_client,workers}}), halt()"

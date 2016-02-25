@@ -783,7 +783,7 @@ process_usage_test_DISABLED() ->
 % and sends one message to a channel where all of the users are registered.
 many_users_one_channel(NumUsers) ->
     init("many_users_one_channel"),
-    ServerPid = whereis(?SERVERATOM),
+    _ServerPid = whereis(?SERVERATOM),
     Channel = new_channel(),
     ParentPid = self(),
     Ref = make_ref(),
@@ -815,7 +815,7 @@ many_users_one_channel(NumUsers) ->
                             ParentPid ! {joined, Ref}
                           end,
                           receive go2 -> ok end,
-                          if I == 1 -> 
+                          if I == 1 ->
                                        io:format(user, "client 1 sending message...~n", []),
                                        TX1 = os:timestamp(),
                                        try
@@ -950,7 +950,7 @@ many_users_many_channels(NumUsers) ->
     % The sleepy process will tell request every request to sleep for 100ms
     Sleepy = fun (FF) ->
       receive
-        {hi, ToPid, Pid} ->
+        {hi, ToPid, _Pid} ->
           %io:format(user, "sleepy ~p ~p~n", [ToPid, Pid]),
           ToPid ! {wait, 50}, % ms
           FF(FF);
@@ -976,7 +976,7 @@ many_users_many_channels(NumUsers) ->
 
 many_users_one_channel_deadlock(NumUsers) ->
     init("many_users_one_channel_deadlock"),
-    ServerPid = whereis(?SERVERATOM),
+    _ServerPid = whereis(?SERVERATOM),
     Channel = new_channel(),
     ParentPid = self(),
     Ref = make_ref(),
@@ -1061,7 +1061,7 @@ many_users_one_channel_deadlock(NumUsers) ->
     [begin P ! go, receive {joined, Ref} -> ok end end || P <- Pids ],
     io:format(user, "all clients connected and joined the channel~n", []),
     [P ! go2 || P <- Pids ],
-    [receive {msgSent, Ref} -> ok end || P <- Pids ],
+    [receive {msgSent, Ref} -> ok end || _ <- Pids ],
     io:format(user, "clients disconnecting...~n", []),
     [begin P ! go3, receive {disconnected, Ref} -> ok end end || P <- Pids ],
     Times = lists:map(Recv, Seq),
@@ -1076,3 +1076,47 @@ summary(MTimes) ->
     Avg = Tot / length(Times),
     Med = lists:nth(length(Times) div 2, lists:sort(Times)),
     putStrLn(red("Time elapsed: ~wms average / ~wms median"), [round(Avg), round(Med)]).
+
+
+% Workers test (lab 4)
+-define(WORKERS, 3).
+workers() ->
+  _ServerPid = init("workers"),
+  ParentPid = self(),
+  UsersSeq = lists:seq(1, ?WORKERS),
+
+  % Connect
+  Fjoin = fun (I) ->
+    try
+      output_off(),
+      Is = lists:flatten(integer_to_list(I)),
+      Nick = "user_conc3_"++Is,
+      ClientName = "client_conc3_"++Is,
+      ClientAtom = list_to_atom(ClientName),
+      GUIName = "gui_conc3_"++Is,
+      new_gui(GUIName, ParentPid),
+      ClientPid = genserver:start(ClientAtom, client:initial_state(Nick, GUIName), fun client:handle/2),
+      connect(ClientAtom),
+      {ClientAtom,ClientPid}
+    catch Ex ->
+      ParentPid ! {failed, Ex} % ignored
+    end
+  end,
+
+  putStrLn("spawning ~p clients", [?WORKERS]),
+  _ClientAtoms = lists:map(Fjoin, UsersSeq),
+  output_on(),
+
+  Function = fun(X) -> timer:sleep(200 * abs(X)), X + X end,
+  Input = [4,1,7,3,-2,5,2],
+
+  Gold = lists:map(fun(X) -> X + X end, Input),
+
+  putStrLn("sending input: ~p (~p tasks)", [Input, length(Input)]),
+
+  TX1 = os:timestamp(),
+  Result = cchat:send_job(?SERVER, Function, Input),
+  TX2 = os:timestamp(),
+  putStrLn("results: ~p received in ~pms", [Result, timer:now_diff(TX2, TX1) div 1000]),
+  Msg = "results received correctly",
+  assert(Msg, Result =:= Gold).
