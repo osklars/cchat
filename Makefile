@@ -4,30 +4,29 @@ all: *.erl *.hrl lex.xrl grm.yrl
 
 clean:
 	rm -f *.beam grm.erl lex.erl
+	rm -f *.dump
 
 run_tests: all
-	erl +P 1000000 -noshell -eval "eunit:test(test_client), halt()"
+	erl -noshell -eval "eunit:test(test_client), halt()"
 
 run_ping_tests: all
-	erl +P 1000000 -noshell -eval "eunit:test({test,test_client,ping}), halt()"
+	erl -noshell -eval "eunit:test({test,test_client,ping}), halt()"
 
 run_robustness_tests: all
-	erl +P 1000000 -noshell -eval "eunit:test({timeout, 10, {test,test_client,robustness_channel}}), halt()"
-	erl +P 1000000 -noshell -eval "eunit:test({timeout, 10, {test,test_client,robustness_server}}), halt()"
+	erl -noshell -eval "eunit:test({timeout, 10, {test,test_client,robustness_channel}}), halt()"
+	erl -noshell -eval "eunit:test({timeout, 10, {test,test_client,robustness_server}}), halt()"
 
 run_concurrency_tests: all
-	erl +P 1000000 -noshell -eval "eunit:test({timeout, 10, {test,test_client,process_usage_test}}), halt()"
+	erl -noshell -eval "eunit:test({timeout, 10, {test,test_client,process_usage_test}}), halt()"
 
 PERFTESTS = "[\
-{timeout, 60, fun () -> test_client:many_users_one_channel_one_message(20) end},\
-{timeout, 60, fun () -> test_client:many_users_one_channel_one_message(50) end},\
-{timeout, 60, fun () -> test_client:many_users_one_channel_many_messages(3) end},\
-{timeout, 60, fun () -> test_client:many_users_many_channels(5) end},\
-{timeout, 60, fun () -> test_client:many_users_many_channels(20) end}\
+{timeout, 60, fun () -> test_client:many_users_one_channel(20, one) end},\
+{timeout, 60, fun () -> test_client:many_users_one_channel(5, all) end},\
+{timeout, 60, fun () -> test_client:many_users_many_channels(10) end}\
 ]"
 
 run_perf_tests: all
-	erl +P 1000000 -noshell -eval "eunit:test("${PERFTESTS}"), halt()"
+	erl -noshell -eval "eunit:test("${PERFTESTS}"), halt()"
 
 run_distributed_tests: all
 	-killall beam.smp 2>/dev/null
