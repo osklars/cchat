@@ -7,7 +7,7 @@
 
 % Produce initial state
 initial_state(ServerName) ->
-    #server_st{}.
+	#server_st{name=ServerName, clients=[], rooms=[]}.
 
 %% ---------------------------------------------------------------------------
 
@@ -18,8 +18,30 @@ initial_state(ServerName) ->
 %% {reply, Reply, NewState}, where Reply is the reply to be sent to the client
 %% and NewState is the new state of the server.
 
+
+handle(St, {connect, nick, Ref, From}) ->
+	case match(nick, clients) of
+		true -> From ! {reply, nick_taken, Ref};
+		false -> NewState=St#server_st{clients=#St.clients++[nick]},
+			From ! {reply, ok, Ref}
+	end;
+
+handle(St, {disconnect, nick, Ref, From}) ->
+	case match(nick, clients)
+
 handle(St, Request) ->
-    io:fwrite("Server received: ~p~n", [Request]),
-    Response = "hi!",
-    io:fwrite("Server is sending: ~p~n", [Response]),
-    {reply, Response, St}.
+	io:fwrite("Server received: ~p~n", [Request]),
+	Response = "hi!",
+	io:fwrite("Server is sending: ~p~n", [Response]),
+	{reply, Response, St}.
+
+
+
+
+match(P,[L|LS]) -> case match(P,L) of
+                              true -> match(P,LS);
+                              false -> false
+                         end;
+match(P,P) -> true;
+match(_,_) -> false.
+
