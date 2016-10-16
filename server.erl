@@ -49,6 +49,14 @@ handle(St, Request={leave, Channel, Nick}) ->
 	NewRoom=lists:delete(Nick, isRoom(Channel, St#server_st.rooms)),
 	NewState=St#server_st{rooms=lists:keyreplace(Channel, 1, St#server_st.rooms, {Channel, NewRoom})},
 	{reply, ok, NewState};
+
+handle(St, Request={msg_from_GUI, Channel, Nick, Msg}) ->
+	io:fwrite("Server received: ~p~n", [Request]),
+	Response=message(Msg, lists:delete(Nick, isRoom(Channel, St#server_st.rooms)), Nick, Channel),
+	case Response of
+		ok -> {reply, ok, St};
+		_ -> {reply, server_not_reached, St}
+	end;
 	
 
 
@@ -71,3 +79,19 @@ nickRoomMatch(Nick, [{_,Clients}|RT]) ->
 isRoom(_, []) -> false;
 isRoom(Channel, [{Channel, Room}|_]) -> Room;
 isRoom(Channel, [_|RT]) -> isRoom(Channel, RT).
+
+message(_, [], _, _) -> ok;
+message(Msg, [Client|Room], Name, Channel) ->
+	Response=genserver:request(Client, {incoming_msg, Channel, Name, Msg}),
+	case Response of
+		ok -> message(Msg, Room, Name, Channel);
+		_ -> server_not_reached
+	end.
+
+
+
+
+
+
+
+

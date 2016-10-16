@@ -84,6 +84,35 @@ handle(St, {leave, Channel}) ->
 	end;
 
 
+% Den enda funktion som inte funkar i programmet än så länge. Det beror på att server försöker kalla på
+% incoming message genom att köra Response=genserver:request(Client, {incoming_msg, Channel, Name, Msg}),
+% och det verkar inte som om det nicket Client är en registrarad client pid i genserver. Nu ser jag att 
+% man kanske ska skicka till gui=GUIName, men då måste jag skriva om så att server lagrar dessa namn i 
+% sitt state.
+handle(St, {msg_from_GUI, Channel, Msg}) -> 
+	Ch=list_to_atom(Channel),
+	Response=genserver:request(St#client_st.server, {msg_from_GUI, Ch, St#client_st.nick, Msg}),
+	case Response of
+		ok -> {reply, ok, St};
+		_ -> {reply, {error, server_not_reached, "Weird error"}, St}
+	end;
+% Ska tydligen kunna returnera user_not_joined, men det känns som om det aldrig kan hända??
+
+
+
+handle(St, whoami) ->
+	{reply, St#client_st.nick, St};
+
+handle(St, {nick, Nick}) ->
+	Name=list_to_atom(Nick),
+	case St#client_st.server of
+		empty -> NewState=St#client_st{nick=Name},
+			{reply, ok, NewState};
+		_ -> {reply, {error, user_already_connected, "Disconnect before renaming!"}, St}
+	end;
+
+
+
 
 %%%%%%%%%%%% example code %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 handle(St, {connecta, Server}) ->
@@ -110,23 +139,23 @@ handle(St, {leavea, Channel}) ->
 	{reply, {error, not_implemented, "Not implemented"}, St} ;
 
 % Sending messages
-handle(St, {msg_from_GUI, Channel, Msg}) ->
+handle(St, {msg_from_GUIa, Channel, Msg}) ->
 	% {reply, ok, St} ;
 	{reply, {error, not_implemented, "Not implemented"}, St} ;
 
 %% Get current nick
-handle(St, whoami) ->
+handle(St, whoamia) ->
 	% {reply, "nick", St} ;
 	{reply, {error, not_implemented, "Not implemented"}, St} ;
 
 %% Change nick
-handle(St, {nick, Nick}) ->
+handle(St, {nicka, Nick}) ->
 	% {reply, ok, St} ;
 	{reply, {error, not_implemented, "Not implemented"}, St} ;
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %% Incoming message %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-handle(St = #client_st { gui = GUIName }, {incoming_msg, Channel, Name, Msg}) ->
+handle(St=#client_st{gui=GUIName}, {incoming_msg, Channel, Name, Msg}) ->
 	gen_server:call(list_to_atom(GUIName), {msg_to_GUI, Channel, Name++"> "++Msg}),
 	{reply, ok, St}.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
