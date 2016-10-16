@@ -11,5 +11,5 @@
 % Add whatever other fields you need.
 % It contains the following fields:
 % 	clients: empty or list of clients.
-% 	rooms: empty or list of roomNames=[clientnick1,...,clientnickn].
+% 	rooms: empty or list of {roomName,[clientnick1,...,clientnickn]}.
 -record(server_st, {name, clients, rooms}).

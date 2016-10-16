@@ -7,7 +7,7 @@
 
 %% Produce initial state
 initial_state(Nick, GUIName) ->
-	#client_st{nick=Nick, gui=GUIName, server=empty, rooms=empty}.
+	#client_st{nick=list_to_atom(Nick), gui=GUIName, server=empty, rooms=[]}.
 
 %% ---------------------------------------------------------------------------
 
@@ -21,49 +21,72 @@ initial_state(Nick, GUIName) ->
 %% Connect to server
 handle(St, {connect, Server}) ->
 	ServerName=list_to_atom(Server),
-	case #St.server of
+	case St#client_st.server of
 		empty -> 
-			Ref=make_ref(),
-			Response=catch(genserver:request(ServerName, {connect, nick, Ref, self()})),
+			Response=genserver:request(ServerName, {connect, St#client_st.nick}), % add catch?
 			case Response of
-				{response, ok, Ref} -> 
+				ok -> 
 					NewState=St#client_st{server=ServerName},
 					{reply, ok, NewState};
-				{response, Error, Ref} -> 
-					{reply, {error, Error, "Nick taken ~n"}, St};
+				nick_taken -> 
+					{reply, {error, nick_taken, "Nick taken"}, St};
 				_ -> 
-					{reply, {error, server_not_reached, "Weird error ~n"}, St}
+					{reply, {error, server_not_reached, "Weird error"}, St}
 			end;
-		CurrentServer -> 
-			{reply, {error, user_already_connected, "You have a server! ~n"}, St}
+		_ -> 
+			{reply, {error, user_already_connected, "You have a server!"}, St}
+	end;
+
+%% Disconnect from server
+handle(St, disconnect) ->
+	case St#client_st.server of
+		empty ->
+			{reply, {error, user_not_connected, "You don't have a server!"}, St};
+		ServerName -> 
+			Response=genserver:request(ServerName, {disconnect, St#client_st.nick}), % add catch?
+			case Response of
+				ok ->
+					NewState=St#client_st{server=empty},
+					{reply, ok, NewState};
+				leave_channels_first ->
+					{reply, {error, leave_channels_first, "Leave rooms first!"}, St};
+				_ -> 
+					{reply, {error, server_not_reached, "Weird error"}, St}
+			end
+	end;
+
+handle(St, {join, Channel}) ->
+	Ch=list_to_atom(Channel),
+	case lists:member(Ch, St#client_st.rooms) of
+		true -> {reply, {error, user_already_joined, "You're in the room already!"}, St};
+		false -> 
+			Response=genserver:request(St#client_st.server, {join, Ch, St#client_st.nick}),
+			case Response of
+				ok ->
+					NewState=St#client_st{rooms=St#client_st.rooms++[Ch]},
+					{reply, ok, NewState};
+				_ -> {reply, {error, server_not_reached, "Weird error"}, St}
+			end
+	end;
+			
+handle(St, {leave, Channel}) ->
+	Ch=list_to_atom(Channel),
+	case lists:member(Ch, St#client_st.rooms) of
+		true ->
+			Response=genserver:request(St#client_st.server, {leave, Ch, St#client_st.nick}),
+			case Response of
+				ok ->
+					NewState=St#client_st{rooms=lists:delete(Ch,St#client_st.rooms)},
+					{reply, ok, NewState};
+				_ -> {reply, {error, server_not_reached, "Weird error"}, St}
+			end;
+		false -> {reply, {error, user_not_joined, "You're not in this room"}, St}
 	end;
 
 
 
-
-
-
-%% Disconnect from server
-handle(St, disconnect) ->
-	case #St.server of
-		empty ->
-			{reply, {error, user_not_connected, "You don't have a server!~n"}, St}
-		ServerName -> 
-			Ref=make_ref(),
-			Response=catch(genserver:request(list_to_atom(Server), {disconnect, nick, Ref, self()})),
-			case Response of
-				{response, ok, Ref} ->
-					NewState=St#client_st{server=empty},
-					{reply, ok, NewState};
-				{response, Error, Ref} ->
-					{reply, {error, Error, "Leave rooms first! ~n"}, St};
-				_ -> 
-					{reply, {error, server_not_reached, "Weird error ~n"}, St}
-			
-
-
-
-handle(St, {connect, Server}) ->
+%%%%%%%%%%%% example code %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+handle(St, {connecta, Server}) ->
 	Data = "hello?",
 	io:fwrite("Client is sending: ~p~n", [Data]),
 	ServerAtom = list_to_atom(Server),
@@ -72,17 +95,17 @@ handle(St, {connect, Server}) ->
 	% {reply, ok, St} ;
 	{reply, {error, not_implemented, "Not implemented"}, St} ;
 
-handle(St, disconnect) ->
+handle(St, disconnecta) ->
 	% {reply, ok, St} ;
 	{reply, {error, not_implemented, "Not implemented"}, St} ;
 
 % Join channel
-handle(St, {join, Channel}) ->
+handle(St, {joina, Channel}) ->
 	% {reply, ok, St} ;
 	{reply, {error, not_implemented, "Not implemented"}, St} ;
 
 %% Leave channel
-handle(St, {leave, Channel}) ->
+handle(St, {leavea, Channel}) ->
 	% {reply, ok, St} ;
 	{reply, {error, not_implemented, "Not implemented"}, St} ;
 
@@ -100,8 +123,13 @@ handle(St, whoami) ->
 handle(St, {nick, Nick}) ->
 	% {reply, ok, St} ;
 	{reply, {error, not_implemented, "Not implemented"}, St} ;
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-%% Incoming message
+%% Incoming message %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 handle(St = #client_st { gui = GUIName }, {incoming_msg, Channel, Name, Msg}) ->
 	gen_server:call(list_to_atom(GUIName), {msg_to_GUI, Channel, Name++"> "++Msg}),
 	{reply, ok, St}.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
