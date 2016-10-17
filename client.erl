@@ -90,7 +90,7 @@ handle(St, {msg_from_GUI, Channel, Msg}) ->
 	Ch=list_to_atom(Channel),
 	case lists:member(Ch, St#client_st.rooms) of
 		true ->
-			Response=genserver:request(St#client_st.server, {msg_from_GUI, Ch, St#client_st.nick, Msg}),
+			Response=genserver:request(Channel, {msg_from_GUI, Ch, St#client_st.nick, Msg}),
 			case Response of
 				ok -> {reply, ok, St};
 				_ -> {reply, {error, server_not_reached, "Weird error"}, St}
