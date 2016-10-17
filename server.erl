@@ -21,15 +21,19 @@ initial_state(ServerName) ->
 
 handle(St, {connect, Client={Nick, _}}) ->
 	case lists:keymember(Nick, 1, St#server_st.clients) of
-		true -> {reply, nick_taken, St};
-		false -> NewState=St#server_st{clients=St#server_st.clients++[Client]},
+		true -> 
+			{reply, nick_taken, St};
+		false -> 
+			NewState=St#server_st{clients=St#server_st.clients++[Client]},
 			{reply, ok, NewState}
 	end;
 
 handle(St, {disconnect, Client}) ->
 	case clientRoomMatch(Client, St#server_st.rooms) of
-		true -> {reply, leave_channels_first, St};
-		false -> NewState=St#server_st{clients=lists:delete(Client, St#server_st.clients)},
+		true -> 
+			{reply, leave_channels_first, St};
+		false -> 
+			NewState=St#server_st{clients=lists:delete(Client, St#server_st.clients)},
 			{reply, ok, NewState}
 	end;
 
@@ -39,18 +43,27 @@ handle(St, {join, Channel, Client}) ->
 			genserver:start(Channel, room:initial_state(Channel, Client), fun room:handle/2),
 			NewState=St#server_st{rooms=St#server_st.rooms++[{Channel, [Client]}]},
 			{reply, ok, NewState};
-		Room -> NewState=St#server_st{rooms=lists:keyreplace(Channel, 1, St#server_st.rooms, {Channel, Room++[Client]})},
-			{reply, ok, NewState}
+		Room -> 
+			Response=genserver:request(Channel, {join, Client}),
+			case Response of
+				ok ->
+					NewState=St#server_st{rooms=lists:keyreplace(Channel, 1, St#server_st.rooms, {Channel, Room++[Client]})},
+					{reply, ok, NewState};
+				_ -> 
+					{reply, error, St}
+			end
 	end;
 
 handle(St, {leave, Channel, Client}) ->
-	NewRoom=lists:delete(Client, isRoom(Channel, St#server_st.rooms)),
-	NewState=St#server_st{rooms=lists:keyreplace(Channel, 1, St#server_st.rooms, {Channel, NewRoom})},
-	{reply, ok, NewState};
-
-handle(St, {msg_from_GUI, Channel, Nick, Msg}) ->
-	[spawn(fun() -> genserver:request(Pid, {incoming_msg, atom_to_list(Channel), atom_to_list(Nick), Msg}) end) || {_, Pid} <- lists:keydelete(Nick, 1, isRoom(Channel, St#server_st.rooms))],
-	{reply, ok, St};
+	Response=genserver:request(Channel, {leave, Client}),
+	case Response of
+		ok ->
+			NewRoom=lists:delete(Client, isRoom(Channel, St#server_st.rooms)),
+			NewState=St#server_st{rooms=lists:keyreplace(Channel, 1, St#server_st.rooms, {Channel, NewRoom})},
+			{reply, ok, NewState};
+		_ -> 
+			{reply, error, St}
+	end;
 	
 
 
@@ -73,12 +86,3 @@ clientRoomMatch(Client, [{_,Clients}|RT]) ->
 isRoom(_, []) -> false;
 isRoom(Channel, [{Channel, Room}|_]) -> Room;
 isRoom(Channel, [_|RT]) -> isRoom(Channel, RT).
-
-
-
-
-
-
-
-
-

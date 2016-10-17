@@ -18,7 +18,21 @@ initial_state(Nick, GUIName) ->
 %% {reply, Reply, NewState}, where Reply is the reply to be sent to the
 %% requesting process and NewState is the new state of the client.
 
+
+
 %% Connect to server
+
+% Input: 
+% 	Server - String of server name.
+% Output: 
+% 	ok - Client successfully connected to server.
+% Errors: 
+% 	nick_taken - Nick already occupied in server.
+% 	user_already_connected - Client already in server.
+% 	server_not_reached - Connection error.
+
+% Checks if client not already in server. If so passes request to server. 
+% Updates record if connection completed.
 handle(St, {connect, Server}) ->
 	ServerName=list_to_atom(Server),
 	case St#client_st.server of
@@ -37,7 +51,18 @@ handle(St, {connect, Server}) ->
 			{reply, {error, user_already_connected, "You have a server!"}, St}
 	end;
 
+
 %% Disconnect from server
+
+% Output:
+% 	ok - Client successfully disconnected from server.
+% Errors:
+% 	user_not_connected - Client not in any server.
+% 	leave_channels_first - Client in rooms.
+% 	server_not_reached - Connection error.
+
+% Checks if client connected to any server. If so passes request to server.
+% Updates record if disconnection completed.
 handle(St, disconnect) ->
 	case St#client_st.server of
 		empty ->
@@ -55,18 +80,31 @@ handle(St, disconnect) ->
 			end
 	end;
 
+
 %% Join room
+
+% Output:
+% 	ok - Client succesfully joined room.
+% Errors:
+% 	user_not_connected - Client not in any server.
+% 	leave_channels_first - Client in rooms.
+% 	server_not_reached - Connection error.
+
+% Checks if client connected to any server. If so passes request to server.
+% Updates record if disconnection completed.
 handle(St, {join, Channel}) ->
 	Ch=list_to_atom(Channel),
 	case lists:member(Ch, St#client_st.rooms) of
-		true -> {reply, {error, user_already_joined, "You're in the room already!"}, St};
+		true -> 
+			{reply, {error, user_already_joined, "You're in the room already!"}, St};
 		false -> 
 			Response=genserver:request(St#client_st.server, {join, Ch, {St#client_st.nick, self()}}),
 			case Response of
 				ok ->
 					NewState=St#client_st{rooms=St#client_st.rooms++[Ch]},
 					{reply, ok, NewState};
-				_ -> {reply, {error, server_not_reached, "Weird error"}, St}
+				_ -> 
+					{reply, {error, server_not_reached, "Weird error"}, St}
 			end
 	end;
 
@@ -80,9 +118,11 @@ handle(St, {leave, Channel}) ->
 				ok ->
 					NewState=St#client_st{rooms=lists:delete(Ch,St#client_st.rooms)},
 					{reply, ok, NewState};
-				_ -> {reply, {error, server_not_reached, "Weird error"}, St}
+				_ -> 
+					{reply, {error, server_not_reached, "Weird error"}, St}
 			end;
-		false -> {reply, {error, user_not_joined, "You're not in this room"}, St}
+		false -> 
+			{reply, {error, user_not_joined, "You're not in this room"}, St}
 	end;
 
 %% Send message
@@ -90,7 +130,7 @@ handle(St, {msg_from_GUI, Channel, Msg}) ->
 	Ch=list_to_atom(Channel),
 	case lists:member(Ch, St#client_st.rooms) of
 		true ->
-			Response=genserver:request(Channel, {msg_from_GUI, Ch, St#client_st.nick, Msg}),
+			Response=genserver:request(Ch, {msg_from_GUI, Ch, St#client_st.nick, Msg}),
 			case Response of
 				ok -> {reply, ok, St};
 				_ -> {reply, {error, server_not_reached, "Weird error"}, St}
@@ -107,9 +147,11 @@ handle(St, whoami) ->
 handle(St, {nick, Nick}) ->
 	Name=list_to_atom(Nick),
 	case St#client_st.server of
-		empty -> NewState=St#client_st{nick=Name},
+		empty -> 
+			NewState=St#client_st{nick=Name},
 			{reply, ok, NewState};
-		_ -> {reply, {error, user_already_connected, "Disconnect before renaming!"}, St}
+		_ -> 
+			{reply, {error, user_already_connected, "Disconnect before renaming!"}, St}
 	end;
 
 %% Incoming message %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -117,6 +159,3 @@ handle(St=#client_st{gui=GUIName}, {incoming_msg, Channel, Name, Msg}) ->
 	gen_server:call(list_to_atom(GUIName), {msg_to_GUI, Channel, Name++"> "++Msg}),
 	{reply, ok, St}.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-
-
