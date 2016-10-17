@@ -9,7 +9,7 @@
 initial_state(Nick, GUIName) ->
 	#client_st{nick=list_to_atom(Nick), gui=GUIName, server=empty, rooms=[]}.
 
-%% ---------------------------------------------------------------------------
+%% ------------------------------------------------------------------------
 
 %% handle/2 handles each kind of request from GUI
 
@@ -23,7 +23,7 @@ handle(St, {connect, Server}) ->
 	ServerName=list_to_atom(Server),
 	case St#client_st.server of
 		empty -> 
-			Response=genserver:request(ServerName, {connect, St#client_st.nick}), % add catch?
+			Response=(catch genserver:request(ServerName, {connect, {St#client_st.nick, self()}})), 
 			case Response of
 				ok -> 
 					NewState=St#client_st{server=ServerName},
@@ -43,7 +43,7 @@ handle(St, disconnect) ->
 		empty ->
 			{reply, {error, user_not_connected, "You don't have a server!"}, St};
 		ServerName -> 
-			Response=genserver:request(ServerName, {disconnect, St#client_st.nick}), % add catch?
+			Response=genserver:request(ServerName, {disconnect, {St#client_st.nick, self()}}), % add catch?
 			case Response of
 				ok ->
 					NewState=St#client_st{server=empty},
@@ -55,12 +55,13 @@ handle(St, disconnect) ->
 			end
 	end;
 
+%% Join room
 handle(St, {join, Channel}) ->
 	Ch=list_to_atom(Channel),
 	case lists:member(Ch, St#client_st.rooms) of
 		true -> {reply, {error, user_already_joined, "You're in the room already!"}, St};
 		false -> 
-			Response=genserver:request(St#client_st.server, {join, Ch, St#client_st.nick}),
+			Response=genserver:request(St#client_st.server, {join, Ch, {St#client_st.nick, self()}}),
 			case Response of
 				ok ->
 					NewState=St#client_st{rooms=St#client_st.rooms++[Ch]},
@@ -68,12 +69,13 @@ handle(St, {join, Channel}) ->
 				_ -> {reply, {error, server_not_reached, "Weird error"}, St}
 			end
 	end;
-			
+
+%% Leave room			
 handle(St, {leave, Channel}) ->
 	Ch=list_to_atom(Channel),
 	case lists:member(Ch, St#client_st.rooms) of
 		true ->
-			Response=genserver:request(St#client_st.server, {leave, Ch, St#client_st.nick}),
+			Response=genserver:request(St#client_st.server, {leave, Ch, {St#client_st.nick, self()}}),
 			case Response of
 				ok ->
 					NewState=St#client_st{rooms=lists:delete(Ch,St#client_st.rooms)},
@@ -83,26 +85,25 @@ handle(St, {leave, Channel}) ->
 		false -> {reply, {error, user_not_joined, "You're not in this room"}, St}
 	end;
 
-
-% Den enda funktion som inte funkar i programmet än så länge. Det beror på att server försöker kalla på
-% incoming message genom att köra Response=genserver:request(Client, {incoming_msg, Channel, Name, Msg}),
-% och det verkar inte som om det nicket Client är en registrarad client pid i genserver. Nu ser jag att 
-% man kanske ska skicka till gui=GUIName, men då måste jag skriva om så att server lagrar dessa namn i 
-% sitt state.
+%% Send message
 handle(St, {msg_from_GUI, Channel, Msg}) -> 
 	Ch=list_to_atom(Channel),
-	Response=genserver:request(St#client_st.server, {msg_from_GUI, Ch, St#client_st.nick, Msg}),
-	case Response of
-		ok -> {reply, ok, St};
-		_ -> {reply, {error, server_not_reached, "Weird error"}, St}
+	case lists:member(Ch, St#client_st.rooms) of
+		true ->
+			Response=genserver:request(St#client_st.server, {msg_from_GUI, Ch, St#client_st.nick, Msg}),
+			case Response of
+				ok -> {reply, ok, St};
+				_ -> {reply, {error, server_not_reached, "Weird error"}, St}
+			end;
+		false ->
+			{reply, {error, user_not_joined, "How did you do this with GUI?!?!?"}, St}
 	end;
-% Ska tydligen kunna returnera user_not_joined, men det känns som om det aldrig kan hända??
 
-
-
+%% Get nick
 handle(St, whoami) ->
 	{reply, St#client_st.nick, St};
 
+%% Set nick
 handle(St, {nick, Nick}) ->
 	Name=list_to_atom(Nick),
 	case St#client_st.server of
@@ -110,49 +111,6 @@ handle(St, {nick, Nick}) ->
 			{reply, ok, NewState};
 		_ -> {reply, {error, user_already_connected, "Disconnect before renaming!"}, St}
 	end;
-
-
-
-
-%%%%%%%%%%%% example code %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-handle(St, {connecta, Server}) ->
-	Data = "hello?",
-	io:fwrite("Client is sending: ~p~n", [Data]),
-	ServerAtom = list_to_atom(Server),
-	Response = genserver:request(ServerAtom, Data),
-	io:fwrite("Client received: ~p~n", [Response]),
-	% {reply, ok, St} ;
-	{reply, {error, not_implemented, "Not implemented"}, St} ;
-
-handle(St, disconnecta) ->
-	% {reply, ok, St} ;
-	{reply, {error, not_implemented, "Not implemented"}, St} ;
-
-% Join channel
-handle(St, {joina, Channel}) ->
-	% {reply, ok, St} ;
-	{reply, {error, not_implemented, "Not implemented"}, St} ;
-
-%% Leave channel
-handle(St, {leavea, Channel}) ->
-	% {reply, ok, St} ;
-	{reply, {error, not_implemented, "Not implemented"}, St} ;
-
-% Sending messages
-handle(St, {msg_from_GUIa, Channel, Msg}) ->
-	% {reply, ok, St} ;
-	{reply, {error, not_implemented, "Not implemented"}, St} ;
-
-%% Get current nick
-handle(St, whoamia) ->
-	% {reply, "nick", St} ;
-	{reply, {error, not_implemented, "Not implemented"}, St} ;
-
-%% Change nick
-handle(St, {nicka, Nick}) ->
-	% {reply, ok, St} ;
-	{reply, {error, not_implemented, "Not implemented"}, St} ;
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %% Incoming message %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 handle(St=#client_st{gui=GUIName}, {incoming_msg, Channel, Name, Msg}) ->

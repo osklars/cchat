@@ -10,6 +10,6 @@
 % This record defines the structure of the server process.
 % Add whatever other fields you need.
 % It contains the following fields:
-% 	clients: empty or list of clients.
+% 	clients: empty or list of clients {nick, pid}.
 % 	rooms: empty or list of {roomName,[clientnick1,...,clientnickn]}.
 -record(server_st, {name, clients, rooms}).
